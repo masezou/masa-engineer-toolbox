@@ -1,4 +1,5 @@
 New-NetFirewallRule -DisplayName "Allow-Inbound-TCP9000" -Direction Inbound -Protocol TCP -LocalPort 9000 -Action Allow
+New-NetFirewallRule -DisplayName "Allow-Inbound-TCP9001" -Direction Inbound -Protocol TCP -LocalPort 9001 -Action Allow
 mkdir C:\minio
 cd C:\minio
 Invoke-WebRequest -Uri https://dl.min.io/client/mc/release/windows-amd64/mc.exe -OutFile mc.exe
@@ -59,6 +60,16 @@ mkdir C:\minio\data2
 mkdir C:\minio\data3
 mkdir C:\minio\data4
 
+
+$env:CONSOLE_MINIO_SERVER = $Env:COMPUTERNAME
+$env:CONSOLE_MINIO_SERVER = $Env:CONSOLE_MINIO_SERVER+=":9000"
+$env:CONSOLE_MINIO_SERVER = "https://"+$Env:CONSOLE_MINIO_SERVER
+write-host $env:CONSOLE_MINIO_SERVER
+$env:CONSOLE_PROMETHEUS_URL = $Env:COMPUTERNAME
+$env:CONSOLE_PROMETHEUS_URL = $Env:CONSOLE_PROMETHEUS_URL+=":9090"
+$env:CONSOLE_PROMETHEUS_URL = "http://"+$Env:CONSOLE_PROMETHEUS_URL
+write-host $env:CONSOLE_PROMETHEUS_URL
+
 cd C:\minio
 echo @"
 <service>
@@ -68,8 +79,8 @@ echo @"
   <executable>minio.exe</executable>
   <env name="MINIO_ROOT_USER" value="minioadminuser"/>
   <env name="MINIO_ROOT_PASSWORD" value="minioadminuser"/>
-  <env name="MINIO_PROMETHEUS_AUTH_TYPE" value="public" />
-  <arguments>server C:\minio\data1 C:\minio\data2 C:\minio\data3 C:\minio\data4</arguments>
+  <env name="MINIO_SERVER_URL" value="$env:CONSOLE_MINIO_SERVER" />
+  <arguments>server C:\minio\data1 C:\minio\data2 C:\minio\data3 C:\minio\data4 --console-address ":9001"</arguments>
   <logmode>rotate</logmode>
   <serviceaccount>
     <domain>$Env:COMPUTERNAME</domain>
@@ -90,6 +101,51 @@ $env:URLHOST = $Env:URLHOST+=":9000"
 write-host $env:URLHOST
 
 C:\minio\mc.exe alias set local https://$env:URLHOST minioadminuser minioadminuser
+
+echo @"
+{
+	"Version": "2012-10-17",
+	"Statement": [{
+			"Action": [
+				"admin:ServerInfo"
+			],
+			"Effect": "Allow",
+			"Sid": ""
+		},
+		{
+			"Action": [
+				"s3:ListenBucketNotification",
+				"s3:PutBucketNotification",
+				"s3:GetBucketNotification",
+				"s3:ListMultipartUploadParts",
+				"s3:ListBucketMultipartUploads",
+				"s3:ListBucket",
+				"s3:HeadBucket",
+				"s3:GetObject",
+				"s3:GetBucketLocation",
+				"s3:AbortMultipartUpload",
+				"s3:CreateBucket",
+				"s3:PutObject",
+				"s3:DeleteObject",
+				"s3:DeleteBucket",
+				"s3:PutBucketPolicy",
+				"s3:DeleteBucketPolicy",
+				"s3:GetBucketPolicy"
+			],
+			"Effect": "Allow",
+			"Resource": [
+				"arn:aws:s3:::*"
+			],
+			"Sid": ""
+		}
+	]
+}
+"@ >s3user.json
+$targetpath = "C:\minio\s3user.json"
+(Get-Content $targetpath) -Join "`r`n" | Set-Content $targetpath
+C:\minio\mc.exe admin policy add local/ s3user s3user.json
+del C:\minio\s3user.json
+
 C:\minio\mc.exe admin info local
 start https://$env:URLHOST
 Write-Host Done. credential is minioadminuser. Hit any key -NoNewLine

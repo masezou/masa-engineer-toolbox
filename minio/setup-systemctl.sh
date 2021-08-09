@@ -64,6 +64,8 @@ mkdir -p ~/.minio/certs
 curl -OL https://dl.min.io/server/minio/release/linux-${ARCH}/minio
 mv minio  /usr/local/bin/
 chmod +x /usr/local/bin/minio
+# minio sysctl tuning
+curl -OL https://raw.githubusercontent.com/minio/minio/master/docs/deployment/kernel-tuning/sysctl.sh | bash
 fi
 
 if [ ! -f /usr/local/bin/mc ]; then
@@ -113,13 +115,13 @@ cat <<EOT > /etc/default/minio
 # Volume to be used for MinIO server.
 MINIO_VOLUMES="/minio/data1 /minio/data2 /minio/data3 /minio/data4"
 # Use if you want to run MinIO on a custom port.
-MINIO_OPTS="--address :9000"
+MINIO_OPTS="--address :9000 --console-address :9001"
 # Access Key of the server.
 MINIO_ROOT_USER=${MINIO_ROOT_USER}
 # Secret key of the server.
 MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-# Use Prometheus
-MINIO_PROMETHEUS_AUTH_TYPE="public"
+# Minio Server for TLS
+MINIO_SERVER_URL=https://${LOCALIPADDR}:9000
 EOT
 fi
 
@@ -127,24 +129,71 @@ fi
 sed -i -e 's/minio-user/root/g' /etc/systemd/system/minio.service
 systemctl enable --now minio.service
 systemctl status minio.service --no-pager
-fi
-
 sleep 3
+
 mc alias rm local
 MINIO_ENDPOINT=https://${LOCALIPADDR}:9000
 mc alias set local ${MINIO_ENDPOINT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} --api S3v4
-mc admin info local/
+cat << EOF > s3user.json
+{
+        "Version": "2012-10-17",
+        "Statement": [{
+                        "Action": [
+                                "admin:ServerInfo"
+                        ],
+                        "Effect": "Allow",
+                        "Sid": ""
+                },
+                {
+                        "Action": [
+                                "s3:ListenBucketNotification",
+                                "s3:PutBucketNotification",
+                                "s3:GetBucketNotification",
+                                "s3:ListMultipartUploadParts",
+                                "s3:ListBucketMultipartUploads",
+                                "s3:ListBucket",
+                                "s3:HeadBucket",
+                                "s3:GetObject",
+                                "s3:GetBucketLocation",
+                                "s3:AbortMultipartUpload",
+                                "s3:CreateBucket",
+                                "s3:PutObject",
+                                "s3:DeleteObject",
+                                "s3:DeleteBucket",
+                                "s3:PutBucketPolicy",
+                                "s3:DeleteBucketPolicy",
+                                "s3:GetBucketPolicy"
+                        ],
+                        "Effect": "Allow",
+                        "Resource": [
+                                "arn:aws:s3:::*"
+                        ],
+                        "Sid": ""
+                }
+        ]
+}
+EOF
+mc admin policy add local/ s3user s3user.json
+rm s3user.json
+fi
 
+mc admin info local/
 echo ""
 echo "*************************************************************************************"
-echo "minio server is ${MINIO_ENDPOINT}"
+echo "Minio API endpoint is ${MINIO_ENDPOINT}"
+echo "MINIO_ROOT_USER=${MINIO_ROOT_USER}"
+echo "MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}"
+echo "Minio console is https://${LOCALIPADDR}:9001"
 echo "username: ${MINIO_ROOT_USER}"
 echo "password: ${MINIO_ROOT_PASSWORD}"
 echo "minio and mc was installed and configured successfully"
+echo ""
+echo "*************************************************************************************"
 echo "Next Step"
-echo "If you want to have minio-console, run console-setup.sh"
-echo "Execute in this console or re-login if you want to use mc completion"
 echo "source /etc/bash_completion.d/mc.sh"
-echo "For Test:"
-echo "mc mb --with-lock local/test01"
+echo "How to configure client at remote host:"
+echo "Copy cert file to ~/.mc/cert/CA/"
+echo "mc alias set Alias_Name ${MINIO_ENDPOINT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} --api S3v4"
+echo "How to create immutable bucket:"
+echo "mc mb --with-lock local/Bucket_Name"
 echo "mc ls local/"
