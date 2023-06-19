@@ -4,6 +4,7 @@
 MCLOGINUSER=miniologinuser
 MCLOGINPASSWORD=miniologinuser
 MINIOPATH=/disk/minio
+#DNSDOMAINNAME=ent8.cloudshift.corp
 
 #########################################################
 MINIO_ROOT_USER=minioadminuser
@@ -36,7 +37,7 @@ exit 255
 fi
 
 ### Distribution Check ###
-UBUNTUVER=`grep DISTRIB_RELEASE /etc/lsb-release | cut -d "=" -f2`
+UBUNTUVER=$(lsb_release -rs)
 case ${UBUNTUVER} in
     "20.04")
        echo -e "\e[32m${UBUNTUVER} is OK. \e[m"
@@ -186,6 +187,22 @@ fi
 
 mkdir -p ${MINIOPATH}
 
+if [ ! -z ${DNSDOMAINNAME} ]; then
+if [ -f /etc/bind/external.key ]; then
+cat << EOF > /tmp/nsupdate.txt
+server ${LOCALIPADDR}
+
+update delete minio.${DNSDOMAINNAME}
+update add minio.${DNSDOMAINNAME} 3600 IN A ${LOCALIPADDR}
+
+EOF
+nsupdate -k /etc/bind/external.key  /tmp/nsupdate.txt
+rm -rf  /tmp/nsupdate.txt
+LOCALHOSTNAME=minio.${DNSDOMAINNAME} 
+fi
+fi
+
+
 # Create SSL Key
 MINIOCERTPATH=${MINIOPATH}/config/certs/
 if [ ! -f ${MINIOCERTPATH}/public.crt ]; then
@@ -227,7 +244,7 @@ services:
         restart: always
         command: --config.file=/etc/prometheus/prometheus.yml
         ports:
-            - "9090:9090"
+            - "9091:9090"
         volumes:
             - ${MINIOPATH}/prometheus.yml:/etc/prometheus/prometheus.yml
     minio:
@@ -236,7 +253,7 @@ services:
             - MINIO_ROOT_USER=${MINIO_ROOT_USER}
             - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
             - MINIO_PROMETHEUS_AUTH_TYPE=public
-            - MINIO_PROMETHEUS_URL=http://${LOCALIPADDR}:9090
+            - MINIO_PROMETHEUS_URL=http://${LOCALIPADDR}:9091
             - MINIO_SERVER_URL=https://${LOCALIPADDR}:9000
         healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -319,6 +336,9 @@ echo "Minio API endpoint is ${MINIO_ENDPOINT}"
 echo "Access Key ${MCLOGINUSER}"
 echo "Secret Key ${MCLOGINPASSWORD}"
 echo "Minio console is https://${LOCALIPADDR}:9001"
+if [ ! -z ${DNSDOMAINNAME} ]; then
+echo ""
+echo "https://minio.${DNSDOMAINNAME}:9001"
 echo "username: ${MCLOGINUSER}"
 echo "password: ${MCLOGINPASSWORD}"
 echo "minio and mc was installed and configured successfully"
